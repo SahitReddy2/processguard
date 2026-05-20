@@ -12,10 +12,26 @@ class StepRepetitionDetector(BaseDetector):
     """
     FM-1.3 — Step Repetition.
 
-    Fingerprints each tool call as (tool_name, canonical_args).
-    Fires when the same fingerprint appears >= threshold times inside a sliding window.
-    After firing it resets the fire-lock so a steer that doesn't change behaviour
-    will fire again, giving the policy engine another chance to escalate.
+    Identifies when an agent has fallen into a loop of issuing the same effective
+    action repeatedly, with no behavioural change between repetitions.
+
+    Fires once an agent has issued the same tool call with the same arguments
+    enough times in close succession that further repetition is no longer
+    plausibly exploratory but a loop the agent cannot break out of on its own.
+
+    Smallest meaningful case: an agent that calls web_search(query="X") three
+    times in a row and is about to call it a fourth, with no intervening
+    reasoning that would change the outcome of the next call.
+
+    Must not fire when the agent calls the same tool with materially different
+    arguments (web_search("X") then web_search("Y")), nor when an unrelated tool
+    is repeated as part of a legitimate fan-out pattern (read_file called once
+    per file across many files).
+
+    Known limitation: two calls count as "the same" only if their arguments
+    match exactly — semantically equivalent calls phrased differently (a
+    paraphrased query that retrieves the same information, a different tool
+    that fetches the same data) will not be flagged.
     """
 
     failure_mode = "FM-1.3"

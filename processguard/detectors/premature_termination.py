@@ -12,8 +12,30 @@ class PrematureTerminationDetector(BaseDetector):
     """
     FM-3.1 — Premature Termination.
 
-    When a TERMINATE event arrives, asks a small LLM judge whether the agent's
-    last output actually addresses the original task goals.
+    Identifies when an agent declares the task complete while its actual
+    output fails to address the goals it was given — the agent has stopped,
+    but the work is not finished.
+
+    Fires whenever an agent has signalled termination and its final output
+    does not, as judged by an independent model, fully address the task as
+    it was originally stated.
+
+    Smallest meaningful case: an agent given "find five recent papers on
+    retrieval-augmented generation, summarize each, and recommend the most
+    relevant one" that terminates after producing summaries for three papers
+    and no recommendation.
+
+    Must not fire when the agent's output is genuinely complete even if
+    brief — an agent given "what's the population of Tokyo?" that terminates
+    with "13.96 million" has fully addressed the task, despite the output
+    being a single line.
+
+    Known limitation: the judge is biased toward output that reads like a
+    finished answer — a confidently-phrased single paragraph that sounds
+    conclusive can be marked COMPLETE even when the task asked for several
+    specific deliverables (five citations, a final recommendation) that the
+    paragraph silently omits.
+
     Requires the `anthropic` package.
     """
 

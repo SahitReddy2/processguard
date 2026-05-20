@@ -12,8 +12,28 @@ class UnawareTerminationDetector(BaseDetector):
     """
     FM-1.5 — Unaware of Termination.
 
-    Fires when an agent exceeds its step budget AND the last N tool calls are all
-    the same type (converged / stuck), indicating it is looping without a plan to stop.
+    Identifies when an agent has lost track of its own termination criteria —
+    it keeps acting past the point where a competent execution of the task
+    would have produced its final answer and stopped.
+
+    Fires when an agent has been working far longer than the task plausibly
+    requires AND has settled into a narrow repertoire of actions, suggesting
+    it has forgotten or never had a plan for when to declare the task done.
+
+    Smallest meaningful case: a research agent asked to "summarize the top
+    three papers on RAG" that has called web_search forty times in a row
+    without ever producing a summary and is about to call it again.
+
+    Must not fire on a legitimately long-running task where the work itself
+    is genuinely large — a research agent given "summarize every paper cited
+    in this 80-page review article" that has called fetch_paper sixty times
+    because there really are sixty citations, and is steadily processing each
+    one.
+
+    Known limitation: an agent that has clearly lost track of when to stop
+    but is alternating between two or three tools rather than fixating on
+    one will slip through — the detector requires the agent to have settled
+    into a single dominant action, not just a narrow set of them.
     """
 
     failure_mode = "FM-1.5"

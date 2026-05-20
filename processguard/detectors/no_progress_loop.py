@@ -19,9 +19,30 @@ class NoProgressLoopDetector(BaseDetector):
     """
     BEYOND-MAST — No-Progress Tool Loop.
 
-    Tracks entity novelty across the last N tool results.
-    Fires when the average fraction of new entities per result drops below
-    `novelty_threshold`, meaning the agent is getting no new information.
+    Identifies when an agent's recent tool calls are returning content the
+    agent has effectively already seen — the agent is still issuing calls,
+    but no longer learning anything new.
+
+    Fires when, taken together, the agent's most recent several tool results
+    have introduced essentially no new information that wasn't already present
+    in the agent's earlier results: the recent window of activity is, in
+    informational terms, redundant with what the agent already knows.
+
+    Smallest meaningful case: a research agent that has run four web_search
+    calls on distinct sub-questions ("RAG retrieval methods", "RAG chunking
+    strategies", "RAG embedding choice", "RAG re-ranking") and each result
+    has only restated the same overview paragraph that appeared in the first
+    response.
+
+    Must not fire when the agent is making genuine progress across distinct
+    sources that happen to share some vocabulary — a developer agent scanning
+    a codebase with grep, where each file returned contains different code
+    even though the same API name appears across many of them.
+
+    Known limitation: "new information" is judged by surface vocabulary in
+    each tool result — a tool that returns the same facts rephrased with
+    different words each time will evade this detector even when the agent
+    is genuinely stuck.
     """
 
     failure_mode = "BEYOND-MAST"

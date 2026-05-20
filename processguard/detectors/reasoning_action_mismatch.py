@@ -13,9 +13,30 @@ class ReasoningActionMismatchDetector(BaseDetector):
     """
     FM-2.6 — Reasoning-Action Mismatch.
 
-    Buffers each REASONING event, then when the next TOOL_CALL arrives for the
-    same agent it asks a small LLM judge whether the action matches the stated
-    intent.  Requires the `anthropic` package.
+    Identifies when an agent's stated reasoning and its next action do not
+    line up — the agent has just declared an intent and then does something
+    materially different from what it said it would do.
+
+    Fires whenever an agent has explicitly stated an intent for its next step
+    and the next observable action does not carry out that intent, as judged
+    by an independent model reading both.
+
+    Smallest meaningful case: an agent that reasons "I will delegate this to
+    the writer agent because the question is stylistic, not factual" and then
+    calls a search tool instead of invoking the writer agent.
+
+    Must not fire when the action is a faithful paraphrase or refinement of
+    the stated intent — an agent that reasons "I'll look up information on X"
+    and then calls web_search(query="X recent developments") is consistent
+    with its plan, just more specific.
+
+    Known limitation: the judge is itself an LLM and brings its own biases —
+    in particular, when the agent's reasoning lays out a multi-step plan
+    ("first I'll search, then read the top result, then summarize") but only
+    the first step is visible in the action, the judge tends to flag this as
+    a mismatch even though the action correctly executes step one.
+
+    Requires the `anthropic` package.
     """
 
     failure_mode = "FM-2.6"
