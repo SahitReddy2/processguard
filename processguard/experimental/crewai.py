@@ -3,22 +3,33 @@ from __future__ import annotations
 import uuid
 from typing import Any, Optional
 
-from .base import BaseAdapter
+from ..adapters.base import BaseAdapter
 from ..core.event import AgentEvent, EventType
 
 
 class CrewAIAdapter(BaseAdapter):
     """
-    Adapter for CrewAI Crew objects.
+    EXPERIMENTAL — CrewAI adapter, not in the v1 supported surface.
 
-    Wraps crew.kickoff() and injects a step_callback that converts each
-    agent step into AgentEvents.  Also wraps each agent's tool calls by
-    monkey-patching the crew's tool list when possible.
+    In CrewAI v0.80+, `step_callback` fires once per agent execution step with
+    a `TaskOutput`-shaped object whose canonical attributes are `.raw`,
+    `.json_dict`, `.pydantic`, `.agent`, and `.description`. This adapter
+    instead probes for `.action`, `.observation`, `.output`, `.result`, and
+    `.return_values` — attributes from the older LangChain-style
+    `AgentAction`/`AgentFinish` shape that CrewAI moved away from.
 
-    Usage (automatic via processguard.attach):
-        import processguard
-        processguard.attach(crew)
-        result = crew.kickoff(inputs={"topic": "RAG"})
+    Concrete consequence: against a current-version CrewAI Crew, this adapter
+    will not emit TOOL_CALL events, which means StepRepetitionDetector,
+    NoProgressLoopDetector, and UnawareTerminationDetector cannot fire. Only
+    the final MESSAGE / TERMINATE events have a chance of being captured.
+
+    A proper CrewAI integration likely needs to wrap `Agent.execute_task` or
+    hook the BaseTool callback chain rather than relying on `step_callback`.
+    Deferred to v1.1.
+
+    Do not import from `processguard.adapters` — this lives in
+    `processguard.experimental` precisely because the v1 contract does not
+    cover it.
     """
 
     def __init__(self, guard):

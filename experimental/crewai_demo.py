@@ -1,12 +1,23 @@
 """
-CrewAI demo — FM-1.3 step repetition + no-progress loop caught at runtime.
+EXPERIMENTAL — CrewAI demo. Not part of the v1 supported surface.
+
+The CrewAI adapter at processguard.experimental.crewai does NOT reliably
+capture tool-call events on current CrewAI versions (it was written against
+the older LangChain-style step_callback shape). As a result, this demo will
+likely produce zero detections even though the agent loops — which is the
+honest reason CrewAI is deferred to v1.1.
+
+This file is kept in `experimental/` for two reasons:
+  1. As scaffolding for whoever picks up the CrewAI rewrite in v1.1.
+  2. As a concrete reproducer for the gap: run this and see for yourself
+     that the detectors do not fire on a CrewAI crew that is clearly stuck.
 
 Requires:
-    pip install processguard[crewai]
+    pip install processguard[experimental-crewai]
     export ANTHROPIC_API_KEY=...
 
 Run:
-    python examples/crewai_demo.py
+    python experimental/crewai_demo.py
 """
 
 from __future__ import annotations
@@ -15,8 +26,8 @@ from crewai import Agent, Task, Crew
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
-import processguard
-from processguard import PolicyAction, PolicyConfig
+from processguard import ProcessGuard, PolicyAction
+from processguard.experimental.crewai import CrewAIAdapter
 
 
 # ── fake tool that never makes progress ───────────────────────────────────────
@@ -64,14 +75,16 @@ def build_crew():
 def main():
     crew = build_crew()
 
-    guard = processguard.attach(
-        crew,
-        default_policy=PolicyAction.STEER,
-        db_path=":memory:",
-    )
+    # processguard.attach() rejects CrewAI in v1 — wire the experimental
+    # adapter manually instead.
+    guard = ProcessGuard(default_policy=PolicyAction.STEER, db_path=":memory:")
+    CrewAIAdapter(guard).attach(crew)
 
-    print("\n=== ProcessGuard CrewAI Demo ===")
+    print("\n=== ProcessGuard CrewAI Demo (experimental) ===")
     print("Task: Research RAG architectures in 2026\n")
+    print("NOTE: This adapter is known not to capture tool-call events on")
+    print("current CrewAI versions. Expect zero detections even if the crew")
+    print("clearly loops. This is the gap that v1.1 will close.\n")
 
     try:
         result = crew.kickoff(inputs={"topic": "RAG architectures 2026"})

@@ -20,15 +20,18 @@ class ProcessGuard:
     Quickstart::
 
         import processguard
-        processguard.attach(crew)          # CrewAI
         processguard.attach(graph)         # LangGraph
-        result = crew.kickoff(...)
+        result = graph.invoke(...)
 
     Custom policy::
 
         guard = ProcessGuard(default_policy=PolicyAction.STEER)
         guard.policy.policies["FM-1.3"] = PolicyConfig(action=PolicyAction.HALT)
         guard.attach(graph)
+
+    v1 supports LangGraph only. A CrewAI adapter exists in
+    `processguard.experimental` but does not capture the tool-call events
+    that most detectors rely on; proper CrewAI support is deferred to v1.1.
     """
 
     def __init__(
@@ -72,23 +75,28 @@ class ProcessGuard:
     def attach(self, framework_object):
         """
         Hook ProcessGuard into a framework object in-place.
-        Supports: CrewAI Crew, LangGraph CompiledGraph / CompiledStateGraph.
+        Supported in v1: LangGraph CompiledGraph / CompiledStateGraph.
         Returns the same object (methods are patched).
         """
         obj_type = type(framework_object).__name__
 
-        if _is_crewai(framework_object):
-            from .adapters.crewai import CrewAIAdapter
-            CrewAIAdapter(self).attach(framework_object)
-
-        elif _is_langgraph(framework_object):
+        if _is_langgraph(framework_object):
             from .adapters.langgraph import LangGraphAdapter
             LangGraphAdapter(self).attach(framework_object)
+
+        elif _is_crewai(framework_object):
+            raise TypeError(
+                "processguard v1 does not support CrewAI. An experimental "
+                "adapter exists at processguard.experimental.crewai but does "
+                "not reliably capture tool-call events. Proper support is "
+                "deferred to v1.1. For now, use processguard.emit() to push "
+                "events manually from your CrewAI step callbacks."
+            )
 
         else:
             raise TypeError(
                 f"processguard.attach() does not recognise '{obj_type}'. "
-                "Supported: CrewAI Crew, LangGraph CompiledGraph. "
+                "Supported in v1: LangGraph CompiledGraph. "
                 "For other frameworks call guard.emit() directly."
             )
 

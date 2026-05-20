@@ -27,16 +27,18 @@ ProcessGuard is a runtime middleware that detects MAST failure modes **as they h
 ```python
 import processguard
 
-# CrewAI
-processguard.attach(crew)
-result = crew.kickoff(inputs={"topic": "RAG architectures"})
-
-# LangGraph
+# LangGraph (the only auto-attach target in v1)
 processguard.attach(graph)
 result = graph.invoke({"messages": [HumanMessage(content="Research RAG")]})
 ```
 
 One line. No SaaS dependency. SQLite by default.
+
+> CrewAI support is deferred to v1.1. An experimental adapter exists at
+> `processguard.experimental.crewai` but does not reliably capture tool-call
+> events on current CrewAI versions — most detectors will not fire. See
+> [`experimental/crewai_demo.py`](experimental/crewai_demo.py) for the
+> reproducer.
 
 ---
 
@@ -76,7 +78,7 @@ guard.policy.policies["FM-3.1"] = PolicyConfig(
     action=PolicyAction.HALT,
 )
 
-guard.attach(crew)
+guard.attach(graph)
 ```
 
 ---
@@ -105,7 +107,7 @@ guard.emit(AgentEvent(
 ## Architecture
 
 ```
-YOUR AGENT (LangGraph / CrewAI / raw loop)
+YOUR AGENT (LangGraph / raw loop)
         │
    ADAPTER  ← normalizes events to OTEL-compatible AgentEvent schema
         │
@@ -120,7 +122,8 @@ YOUR AGENT (LangGraph / CrewAI / raw loop)
 
 ## Roadmap
 
-- **V1** (now): 5 detectors, LangGraph + CrewAI adapters, SQLite storage
+- **V1** (now): 5 detectors, LangGraph adapter, SQLite storage
+- **V1.1**: working CrewAI adapter (current one is experimental — see above)
 - **V2**: 4 more detectors (derailment, verification), AutoGen + OpenAI Agents SDK adapters, optional hosted dashboard
 - **Later**: MCP server interface, graph DB trace storage, auto-tuned thresholds
 

@@ -3,8 +3,8 @@ processguard — runtime detection for multi-agent coordination failures.
 
 Quickstart:
     import processguard
-    processguard.attach(crew)    # or graph
-    result = crew.kickoff(...)
+    processguard.attach(graph)
+    result = graph.invoke(...)
 """
 
 from .guard import ProcessGuard
@@ -36,9 +36,9 @@ def attach(framework_object, **kwargs) -> ProcessGuard:
 
     Example::
 
-        guard = processguard.attach(crew)
+        guard = processguard.attach(graph)
         guard.policy.policies["FM-1.3"] = PolicyConfig(action=PolicyAction.HALT)
-        crew.kickoff(...)
+        graph.invoke(...)
     """
     global _default_guard
     _default_guard = ProcessGuard(**kwargs)
