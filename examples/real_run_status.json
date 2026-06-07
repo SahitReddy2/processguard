@@ -1,0 +1,16 @@
+{
+  "task": "Compare retrieval-augmented generation, fine-tuning, and prompt engineering for a domain-specific question-answering system over internal company documentation. Recommend one approach with reasoning.",
+  "model": "gemini-2.5-flash",
+  "llm_judge_detectors_enabled": false,
+  "recursion_limit": 20,
+  "final_state": "completed",
+  "exception_type": null,
+  "exception_message": null,
+  "ddg_available": true,
+  "ddg_failed": false,
+  "ddg_used": false,
+  "total_search_calls": 0,
+  "per_call": [],
+  "detections": [],
+  "final_output_length": 1
+}

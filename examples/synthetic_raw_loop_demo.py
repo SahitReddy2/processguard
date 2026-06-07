@@ -1,10 +1,22 @@
 """
-Raw loop demo — manual emit API for frameworks not yet natively supported.
+SYNTHETIC raw-loop demo — constructed to trigger StepRepetition and
+NoProgressLoop via hand-crafted AgentEvents pushed through the manual
+emit API.
+
+This is NOT a real-world run. Every event is hand-written to put the
+detectors into firing states; the script exists to show the manual-emit
+API surface for frameworks ProcessGuard doesn't have an adapter for,
+and to provide a deterministic detector demo with zero external
+dependencies (no LLM, no network).
+
+For a non-synthetic run with real model decisions, see
+`examples/real_langgraph_demo.py` and the findings in
+`docs/real_run_findings.md`.
 
 No external dependencies required (uses :memory: SQLite, no LLM detectors).
 
 Run:
-    python examples/raw_loop_demo.py
+    python examples/synthetic_raw_loop_demo.py
 """
 
 import uuid

@@ -1,11 +1,25 @@
 """
-LangGraph demo — FM-1.3 step repetition caught at runtime.
+SYNTHETIC LangGraph demo — constructed to trigger FM-1.3 (step repetition)
+and the no-progress-loop detector via a tool that always returns the same
+useless string.
+
+This is NOT a real-world run. The agent's behavior here is engineered:
+the `web_search` tool returns identical content on every call, which
+forces the agent to either repeat its query (catches StepRepetition) or
+loop without progress (catches NoProgressLoop). The detectors firing in
+this script proves wiring, not correctness against organic agent
+behavior.
+
+For a non-synthetic run with real model decisions and real search
+results, see `examples/real_langgraph_demo.py` — and read
+`docs/real_run_findings.md` for what that run revealed about the
+LangGraph adapter (spoiler: it has known bugs as of v0.1.1).
 
 Requires:
     pip install processguard[langgraph] langchain-anthropic
 
 Run:
-    python examples/langgraph_demo.py
+    python examples/synthetic_langgraph_demo.py
 """
 
 from __future__ import annotations
