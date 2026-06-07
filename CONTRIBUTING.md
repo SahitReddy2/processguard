@@ -10,7 +10,9 @@ PR.
 ```bash
 git clone https://github.com/SahitReddy2/processguard.git
 cd processguard
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+python -m venv .venv
+source .venv/bin/activate         # macOS / Linux
+# .venv\Scripts\activate          # Windows (PowerShell or cmd)
 pip install -e ".[langgraph,dev]"
 ```
 
