@@ -56,7 +56,17 @@ def main() -> int:
     p.add_argument(
         "--quiet",
         action="store_true",
-        help="Don't print the markdown report (still writes JSON).",
+        help="Suppress the per-case stdout chatter (markdown report still prints unless --no-markdown).",
+    )
+    p.add_argument(
+        "--no-markdown",
+        action="store_true",
+        help="Don't print the markdown report to stdout (use --markdown-out to write to a file instead).",
+    )
+    p.add_argument(
+        "--markdown-out",
+        default=None,
+        help="Write the markdown report to this file path (in addition to stdout, unless --no-markdown).",
     )
     args = p.parse_args()
 
@@ -86,9 +96,13 @@ def main() -> int:
         json_path = ROOT / "eval_results" / f"v0.2_{ts}.json"
     report.write_json(json_path)
 
-    if not args.quiet:
+    markdown = render_markdown(report)
+    if args.markdown_out:
+        Path(args.markdown_out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.markdown_out).write_text(markdown, encoding="utf-8")
+    if not args.no_markdown:
         print()
-        print(render_markdown(report))
+        print(markdown)
 
     print(f"\nReport: {json_path}", file=sys.stderr)
     print(

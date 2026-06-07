@@ -3,7 +3,8 @@
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)
 ![Latest tag](https://img.shields.io/github/v/tag/SahitReddy2/processguard?label=latest)
-<!-- tests-passing badge added once Phase 5 CI workflows land -->
+[![tests](https://github.com/SahitReddy2/processguard/actions/workflows/tests.yml/badge.svg)](https://github.com/SahitReddy2/processguard/actions/workflows/tests.yml)
+[![eval-gate](https://github.com/SahitReddy2/processguard/actions/workflows/eval-gate.yml/badge.svg)](https://github.com/SahitReddy2/processguard/actions/workflows/eval-gate.yml)
 
 **Runtime detection for the coordination failures that kill 41–87% of multi-agent runs** — mapped to the peer-reviewed MAST taxonomy, fired live as the agent is running, with adapter-level event capture for LangGraph.
 

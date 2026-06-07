@@ -1,0 +1,83 @@
+name: eval-gate
+
+on:
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+
+# Permissions needed to post / update PR comments via GITHUB_TOKEN.
+permissions:
+  contents:      read
+  pull-requests: write
+  issues:        write
+
+jobs:
+  run-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[langgraph,dev]"
+
+      # Run the harness. --quiet suppresses per-case stdout; the markdown is
+      # written to report.md AND printed (so the Actions log is also readable);
+      # JSON artefact goes to eval_results/ci.json. We capture the exit code
+      # without letting `set -e` kill the step, so the comment-post and
+      # artifact-upload steps still run on a failed eval. The final step
+      # enforces the captured exit code.
+      - name: Run eval harness
+        id:   eval
+        run: |
+          python scripts/run_eval.py \
+            --gold datasets/gold/v0.2.jsonl \
+            --quiet \
+            --markdown-out eval_results/report.md \
+            --output      eval_results/ci.json \
+            && code=0 || code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Upload JSON report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report-json
+          path: eval_results/ci.json
+          if-no-files-found: warn
+
+      # Find any existing eval-gate comment so we edit-in-place rather than
+      # spamming a new comment per push.
+      - name: Find existing comment
+        if: always() && github.event_name == 'pull_request'
+        uses: peter-evans/find-comment@v3
+        id: find-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: github-actions[bot]
+          body-includes: ProcessGuard eval gate
+
+      - name: Post or update PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: eval_results/report.md
+          edit-mode: replace
+
+      # Re-export the harness exit code so the workflow fails when any
+      # deterministic case fails/errors. (SKIPPED is treated as build-passing
+      # inside the harness, so a missing API key in CI does not fail the gate.)
+      - name: Enforce gate exit code
+        if: always()
+        run: |
+          test "${{ steps.eval.outputs.exit_code }}" = "0"
