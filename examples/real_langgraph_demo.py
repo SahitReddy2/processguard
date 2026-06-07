@@ -15,7 +15,7 @@ which is the thing we want to observe); the in-memory fallback only kicks
 in on actual exceptions, not on low-quality results.
 
 Requires:
-    pip install processguard[langgraph] langchain-google-genai duckduckgo-search
+    pip install processguard[langgraph] langchain-google-genai ddgs
     export GOOGLE_API_KEY=...
 
 Run:
@@ -28,6 +28,14 @@ this run via llm_detectors=False — their behaviour is audited separately
 in docs/judge_audit.md. The three rule-based detectors (StepRepetition,
 UnawareTermination, NoProgressLoop) are framework-independent and run as
 normal.
+
+Search fallback policy (post v0.2.2 probe finding): the in-memory KB is
+engaged on (a) an actual DDG exception (network, rate limit, etc.), OR
+(b) after `_DDG_EMPTY_FALLBACK_AFTER` consecutive empty-result responses.
+The original v0.1.1 logic only triggered (a); the v0.2.2 probe found DDG
+returning `(no results)` for three reasonable queries without ever
+raising, which left the agent with no information and the fallback
+unused. Path (b) closes that gap.
 """
 
 from __future__ import annotations
@@ -54,11 +62,24 @@ from processguard import PolicyAction
 # ── search tool: DuckDuckGo with in-memory fallback ──────────────────────────
 
 try:
-    from duckduckgo_search import DDGS as _DDGSClass
+    # `ddgs` is the renamed continuation of the old `duckduckgo_search` package.
+    # Importing the old name still works but emits a deprecation warning on every
+    # call. Prefer the new name; fall back to the old one for users who haven't
+    # migrated their environment yet.
+    from ddgs import DDGS as _DDGSClass               # type: ignore
     _DDGS_AVAILABLE = True
 except ImportError:
-    _DDGSClass = None
-    _DDGS_AVAILABLE = False
+    try:
+        from duckduckgo_search import DDGS as _DDGSClass   # type: ignore
+        _DDGS_AVAILABLE = True
+    except ImportError:
+        _DDGSClass = None
+        _DDGS_AVAILABLE = False
+
+# Engage the in-memory fallback once we've seen this many consecutive
+# empty-result responses from DDG. Empirically, two in a row is enough
+# signal that DDG isn't being useful on this network / this hour.
+_DDG_EMPTY_FALLBACK_AFTER = 2
 
 
 _IN_MEMORY_KB = [
@@ -142,13 +163,14 @@ def _in_memory_search(query: str) -> str:
 
 _search_calls = 0
 _ddg_failed_once = False
+_ddg_consecutive_empty = 0
 _per_call_meta: list[dict] = []   # populated by web_search; copied into status JSON
 
 
 @tool
 def web_search(query: str) -> str:
     """Search the web for information on a topic."""
-    global _search_calls, _ddg_failed_once
+    global _search_calls, _ddg_failed_once, _ddg_consecutive_empty
     _search_calls += 1
     print(f"  [tool] web_search({query!r})  call #{_search_calls}")
 
@@ -156,18 +178,44 @@ def web_search(query: str) -> str:
         try:
             with _DDGSClass() as ddgs:
                 results = list(ddgs.text(query, max_results=3))
-            _per_call_meta.append({
-                "call":         _search_calls,
-                "query":        query,
-                "source":       "ddg",
-                "ddg_results":  len(results),
-                "result_titles": [r.get("title", "") for r in results],
-            })
             if results:
+                _ddg_consecutive_empty = 0
+                _per_call_meta.append({
+                    "call":         _search_calls,
+                    "query":        query,
+                    "source":       "ddg",
+                    "ddg_results":  len(results),
+                    "result_titles": [r.get("title", "") for r in results],
+                })
                 return "\n\n".join(
                     f"{r.get('title','')}: {r.get('body','')}"
                     for r in results
                 )
+
+            # Empty result — count it. After enough in a row, treat DDG as
+            # effectively unavailable for the rest of this run and engage
+            # the in-memory fallback (incl. for this same query, retroactively).
+            _ddg_consecutive_empty += 1
+            _per_call_meta.append({
+                "call":         _search_calls,
+                "query":        query,
+                "source":       "ddg",
+                "ddg_results":  0,
+                "result_titles": [],
+            })
+            if _ddg_consecutive_empty >= _DDG_EMPTY_FALLBACK_AFTER:
+                print(
+                    f"  [search] DDG returned empty {_ddg_consecutive_empty}x in a row; "
+                    "switching to in-memory KB for the rest of this run"
+                )
+                _ddg_failed_once = True
+                _per_call_meta.append({
+                    "call":   _search_calls,
+                    "query":  query,
+                    "source": "in_memory_fallback",
+                    "ddg_giveup_reason": "consecutive_empty",
+                })
+                return _in_memory_search(query)
             return "(no results)"
         except Exception as e:
             print(

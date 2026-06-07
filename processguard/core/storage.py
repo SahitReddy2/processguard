@@ -115,6 +115,18 @@ class TraceStorage:
                 "SELECT COUNT(*) FROM events WHERE trace_id=?", (trace_id,)
             ).fetchone()[0]
 
+    # ── shutdown ────────────────────────────────────────────────────────────
+
+    def close(self):
+        """Close the underlying SQLite connection. Safe to call multiple times.
+        After close(), further read/write calls will raise ProgrammingError."""
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                finally:
+                    self._conn = None  # type: ignore[assignment]
+
     # ── helpers ─────────────────────────────────────────────────────────────
 
     def _row(self, row) -> AgentEvent:

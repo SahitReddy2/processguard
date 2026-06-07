@@ -113,6 +113,30 @@ class ProcessGuard:
         """
         return self._emit(event)
 
+    # ── shutdown ─────────────────────────────────────────────────────────────
+
+    def close(self):
+        """Release resources held by this guard — currently the SQLite trace
+        connection. Idempotent: safe to call multiple times. Always pair with
+        ProcessGuard usage in long-running processes or test suites; without
+        it, Python emits ResourceWarning when the guard is GC'd."""
+        self.storage.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
+    def __del__(self):
+        # Best-effort cleanup. Destructors must never raise, so swallow any
+        # error here; the user's close() call is the canonical shutdown path.
+        try:
+            self.close()
+        except Exception:
+            pass
+
     # ── adapter callbacks ────────────────────────────────────────────────────
 
     def _emit(self, event: AgentEvent) -> list[str]:
