@@ -16,7 +16,7 @@
 pip install git+https://github.com/SahitReddy2/processguard.git#egg=processguard[langgraph]
 ```
 
-(Not on PyPI yet. v0.1.1 is the first tagged release; install from git until a release is published.)
+(Not on PyPI yet. v0.2.0 is the latest tagged release; install from git until a release is published.)
 
 ---
 
@@ -174,10 +174,11 @@ YOUR AGENT (LangGraph today; CrewAI experimental; raw loop via guard.emit)
 
 ## Roadmap
 
-- **v0.1.1 (current):** 5 detectors, LangGraph adapter (with the two adapter bugs from Item 4 fixed), SQLite storage, judge-audit doc, real-run findings doc.
-- **v1.1:** working CrewAI adapter, evaluation harness for the two LLM-judge detectors (with measured precision/recall on a 20-case fixture set), REASONING-event auto-emission for Claude extended-thinking responses, PyPI release.
-- **v2:** four more detectors (FM-2.3 task derailment, FM-3.3 incorrect verification, FM-1.4 loss of history), AutoGen + OpenAI Agents SDK adapters, optional hosted dashboard.
-- **Later:** MCP server interface, graph-DB trace storage, auto-tuned thresholds per framework.
+- **v0.1.1:** 5 detectors, LangGraph adapter (with two adapter bugs from Item 4 fixed), SQLite storage, judge-audit doc, real-run findings doc.
+- **v0.2.0 (current):** offline evaluation harness + GitHub Actions CI gate. Six deterministic evaluators, a 10-case regression-heavy gold set, a JSONL case format, and a workflow that runs the harness on every PR and posts the markdown report as a comment. No LLM API keys required for the CI-gated path; LLM-required cases SKIP gracefully. See [`docs/v0.2_plan.md`](docs/v0.2_plan.md) for the design.
+- **v0.3:** calibrated LLM-as-judge for FM-2.6 and FM-3.1 (hand-labelled 20-case set, measured judge↔human agreement), `pass^k` consistency metric, behavioural-realism gold set scored by the judge.
+- **v1.0+:** working CrewAI adapter, AutoGen + OpenAI Agents SDK adapters, REASONING-event auto-emission for Claude extended-thinking, PyPI release once an external user asks.
+- **Later:** four more detectors (FM-2.3 task derailment, FM-3.3 incorrect verification, FM-1.4 loss of history), online evaluation sampler, MCP server interface, graph-DB trace storage, auto-tuned thresholds per framework.
 
 ---
 

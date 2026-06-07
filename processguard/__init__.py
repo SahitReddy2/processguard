@@ -11,7 +11,7 @@ from .guard import ProcessGuard
 from .core.policy import PolicyAction, PolicyConfig, Detection, PolicyEngine, ProcessGuardError
 from .core.event import AgentEvent, EventType
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 __all__ = [
     "ProcessGuard",
     "attach",

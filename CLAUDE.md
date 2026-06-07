@@ -24,30 +24,52 @@ English, what it does and doesn't catch. No vibes-based detection.
 
 ---
 
-## Current state (v0.1.1)
+## Current state (v0.2.0)
 
-- 5 detectors: FM-1.3 step repetition, FM-1.5 unaware termination,
-  BEYOND-MAST no-progress tool loop, FM-2.6 reasoning-action mismatch,
-  FM-3.1 premature termination. Contracts below.
+**v0.2 added an offline evaluation harness, a CI gate, and repo hygiene.**
+The detector + adapter half is unchanged from v0.1.1.
+
+- 5 detectors (contracts below): FM-1.3 step repetition, FM-1.5 unaware
+  termination, BEYOND-MAST no-progress tool loop, FM-2.6 reasoning-action
+  mismatch, FM-3.1 premature termination.
 - LangGraph adapter (auto-attach via `processguard.attach(graph)`).
-  Two real bugs surfaced by the v0.1.1 real-run validation and fixed
-  in the same release window — see `docs/real_run_findings.md`.
 - SQLite trace storage, thread-safe via shared connection + lock.
 - Policy engine with four actions; per-failure-mode overrides supported.
-- 34 tests passing — 24 from v0.1.0 plus 10 added in v0.1.1 covering
-  adapter re-entry, callback translation, TERMINATE synthesis, and
-  cross-thread storage access.
+- **NEW in v0.2 — `processguard.evaluators`**: registry + 6 deterministic
+  evaluators (`AssertToolCalled`, `AssertWithinStepBudget`,
+  `AssertDetectorFired`, `AssertDetectorDidNotFire`,
+  `AssertEventCountByType`, `AssertSingleTraceId`). Unknown assertion
+  types raise `AssertionTypeNotRegistered` with the full registered list
+  in the error message.
+- **NEW in v0.2 — `processguard.harness`**: `EvalCase` schema, `Harness`
+  runner with per-case `:memory:` SQLite isolation and SKIPPED-as-green
+  env-var handling, `EvalReport` with markdown rendering.
+- **NEW in v0.2 — 10-case gold set** at `datasets/gold/v0.2.jsonl`.
+  Regression-heavy: 6 deterministic cases (run in CI without keys),
+  4 LLM-required cases that SKIP gracefully without
+  `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY`.
+- **NEW in v0.2 — CI gate**: `.github/workflows/tests.yml` runs pytest
+  on Python 3.10/3.11/3.12, `.github/workflows/eval-gate.yml` runs the
+  harness on PRs and posts the markdown report as an edit-in-place PR
+  comment. Branch protection is documented in CONTRIBUTING.md as a
+  manual repo-settings step, not enforced by the workflows themselves.
+- 59 tests passing — 34 from v0.1.1 plus 25 added in v0.2 covering
+  evaluator behaviour, registry errors, harness end-to-end, JSONL
+  loader, and SKIPPED-vs-FAILED behaviour.
 
 Known gaps documented honestly in the README's "What doesn't work yet"
-section. The short version:
+section. The short version (unchanged from v0.1.1 — v0.2 didn't claim
+to close any of these):
 - CrewAI deferred to v1.1 — experimental adapter exists, doesn't work.
 - REASONING events not auto-emitted by the LangGraph adapter (provider
   callback chains have no canonical reasoning channel). FM-2.6 only
   fires if the user emits REASONING events manually.
 - Two LLM-judge detectors have no measured precision/recall — audit
-  in `docs/judge_audit.md`, harness proposed but not implemented.
+  in `docs/judge_audit.md`, harness proposed but not implemented. v0.3
+  Phase 2 closes this.
 - End-to-end TOOL_CALL/TOOL_RESULT path is unit-tested only; real-run
-  validation through a tool-invoking agent remains open.
+  validation through a tool-invoking agent remains open (Gemini answered
+  from priors during Item 4; see `docs/real_run_findings.md`).
 
 ---
 
@@ -197,7 +219,16 @@ user to say "push" (or equivalent) before running `git push` or
 processguard/
 ├── README.md                          # public-facing pitch + what works/doesn't
 ├── CLAUDE.md                          # you are here
+├── LICENSE                            # MIT (added in v0.2 Phase 0)
+├── CONTRIBUTING.md                    # setup, style, PR process, branch-protection note
 ├── pyproject.toml                     # version, deps, optional-deps groups
+├── .github/
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── bug_report.md
+│   │   └── feature_request.md
+│   └── workflows/                     # added in v0.2 Phase 5
+│       ├── tests.yml                  # pytest matrix on 3.10 / 3.11 / 3.12
+│       └── eval-gate.yml              # runs the harness on PRs + posts comment
 ├── processguard/
 │   ├── __init__.py                    # attach() entry point
 │   ├── guard.py                       # ProcessGuard class, adapter dispatch
@@ -214,11 +245,25 @@ processguard/
 │   ├── adapters/
 │   │   ├── base.py
 │   │   └── langgraph.py               # CompiledStateGraph adapter, callback handler
+│   ├── evaluators/                    # added in v0.2 Phase 1
+│   │   ├── base.py                    # Evaluator ABC + EvalResult
+│   │   ├── registry.py                # register / get / AssertionTypeNotRegistered
+│   │   └── deterministic.py           # the 6 Assert* classes
+│   ├── harness/                       # added in v0.2 Phase 1
+│   │   ├── eval_case.py               # EvalCase dataclass + JSONL loader
+│   │   ├── runner.py                  # Harness with isolation + SKIPPED handling
+│   │   └── report.py                  # EvalReport + markdown rendering
 │   └── experimental/
 │       ├── __init__.py
 │       └── crewai.py                  # NOT IN V1 — see README
+├── datasets/
+│   └── gold/                          # added in v0.2 Phase 1
+│       ├── v0.2.jsonl                 # 10-case gold set (regression-heavy)
+│       └── README.md                  # per-case intent + how to add a new case
+├── scripts/
+│   └── run_eval.py                    # CLI for the eval harness (also called by CI)
 ├── examples/
-│   ├── real_langgraph_demo.py         # the canonical v0.1.1 demo
+│   ├── real_langgraph_demo.py         # canonical v0.1.1 demo (Gemini-driven)
 │   ├── real_run_log.jsonl             # captured event stream from the canonical run
 │   ├── real_run_status.json           # structured run summary
 │   ├── synthetic_langgraph_demo.py    # rigged to fire detectors — for demo only
@@ -226,16 +271,21 @@ processguard/
 ├── experimental/
 │   └── crewai_demo.py                 # reproducer for the CrewAI adapter gap
 ├── docs/
+│   ├── demo.png                       # README screenshot of synthetic raw-loop run
+│   ├── v0.2_plan.md                   # the canonical v0.2 plan (reconciliation + phasing)
 │   ├── judge_audit.md                 # FM-2.6 + FM-3.1 prompts, failure cases, harness proposal
-│   └── real_run_findings.md           # Item 4 findings + the three bugs it surfaced (with fixes)
-└── tests/                             # 34 tests
+│   └── real_run_findings.md           # Item 4 findings + the three v0.1.1 bugs (with fixes)
+└── tests/                             # 59 tests
     ├── conftest.py
     ├── test_step_repetition.py
     ├── test_unaware_termination.py
     ├── test_no_progress_loop.py
     ├── test_policy.py
     ├── test_langgraph_adapter.py      # added in v0.1.1
-    └── test_storage_threading.py      # added in v0.1.1
+    ├── test_storage_threading.py      # added in v0.1.1
+    ├── test_eval_registry.py          # added in v0.2
+    ├── test_evaluators.py             # added in v0.2
+    └── test_eval_harness.py           # added in v0.2
 ```
 
 ---
@@ -245,6 +295,9 @@ processguard/
 ```bash
 # Test suite
 python -m pytest -q
+
+# Eval harness (same script CI runs). No API keys needed — LLM cases skip.
+python scripts/run_eval.py --gold datasets/gold/v0.2.jsonl
 
 # Synthetic demo (no API key, no network)
 python examples/synthetic_raw_loop_demo.py
