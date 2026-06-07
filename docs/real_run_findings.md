@@ -396,6 +396,70 @@ data for, or (c) a more elaborate unit test that simulates a
 LangGraph run with a mock model that always emits tool calls. None
 of these are in scope for v0.1.1.
 
+---
+
+## Update — gap closed in v0.2.2 (2026-06-07)
+
+The validation gap above is **closed**. A real Gemini run with a task
+that intrinsically requires fresh data (*"What is the current temperature
+in San Francisco, California? Use your web_search tool to look it up if
+you do not know."*) drove the agent to actually invoke the tool, and the
+adapter captured the full event stream end-to-end.
+
+### Event log (8 events, 1 trace, Bug 1 still fixed)
+
+```
+[01] tool_call    agent=agent  tool=web_search  args=current temperature in San Francisco, California
+[02] tool_result  agent=agent                   body=(no results)
+[03] tool_call    agent=agent  tool=web_search  args=weather in San Francisco, California
+[04] tool_result  agent=agent                   body=(no results)
+[05] tool_call    agent=agent  tool=web_search  args=San Francisco California temperature
+[06] tool_result  agent=agent                   body=(no results)
+[07] message      agent=agent  body=I am sorry, but I was unable to find the current temperature…
+[08] terminate    agent=agent  body=I am sorry, but I was unable to find the current temperature…
+```
+
+### What this confirms
+
+- The LangGraph adapter's `on_tool_start` callback correctly translates
+  to `TOOL_CALL` events with the right `tool_name` and per-call args.
+- The `on_tool_end` callback correctly translates to `TOOL_RESULT`
+  events with the tool's return value.
+- The single-trace guarantee (Bug 1) holds on a real multi-step run.
+- The `TERMINATE` synthesis (Bug 2a) fires on clean completion.
+- The thread-safe storage (Bug 1b) survives a multi-step agent loop
+  with worker-thread callbacks (no `OperationalError`).
+- No detector spuriously fired (3 distinct queries don't trip
+  StepRepetition; NoProgressLoop needs ≥4 results in its window).
+
+### Side-findings (real, worth tickets but not blockers)
+
+1. **DDG returned `(no results)` for all three queries.** Not an
+   exception — DDG simply returned empty. This means the in-memory
+   fallback path (which only kicks in on `Exception`) was never
+   engaged, and the agent had nothing useful to work with. The
+   fallback policy may want to expand to also kick in on consecutive
+   empty results, not just exceptions.
+2. **`duckduckgo_search` package is deprecated** — every call emits
+   `RuntimeWarning: This package (duckduckgo_search) has been renamed
+   to ddgs! Use pip install ddgs instead.` Migration is mechanical
+   (rename import, pin `ddgs>=…` in optional-deps).
+3. **Minor SQLite resource leak** — when a `ProcessGuard` is garbage
+   collected without an explicit close, Python emits
+   `ResourceWarning: unclosed database`. Not visible in normal demo
+   usage but cosmetically present in ad-hoc probes. Add `__del__` /
+   `close()` method.
+
+None of these affect the adapter validation. They are deferred to
+follow-up tickets.
+
+### Open from v0.1.1, now closed
+
+| v0.1.1 doc claim | v0.2.2 status |
+|---|---|
+| "End-to-end TOOL_CALL/TOOL_RESULT path unit-tested only" | ✅ now validated end-to-end on a real Gemini run |
+| "Whether real LangGraph agents on real models reliably trigger those callbacks remains open" | ✅ confirmed: callbacks fire correctly |
+
 ### Test coverage delta
 
 - v0.1.0: 24 tests (4 detectors + policy)
