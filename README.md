@@ -1,6 +1,15 @@
 # processguard
 
+![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)
+![Latest tag](https://img.shields.io/github/v/tag/SahitReddy2/processguard?label=latest)
+<!-- tests-passing badge added once Phase 5 CI workflows land -->
+
 **Runtime detection for the coordination failures that kill 41–87% of multi-agent runs** — mapped to the peer-reviewed MAST taxonomy, fired live as the agent is running, with adapter-level event capture for LangGraph.
+
+![Detectors firing on the no-progress synthetic demo](docs/demo.png)
+
+*Detectors firing on `examples/synthetic_raw_loop_demo.py` — no LLM required for this one. See `examples/real_langgraph_demo.py` for the non-synthetic Gemini-driven run.*
 
 ```bash
 pip install git+https://github.com/SahitReddy2/processguard.git#egg=processguard[langgraph]
