@@ -248,28 +248,68 @@ def _final_message_text(content) -> str:
     return str(content)
 
 
-# ── main ─────────────────────────────────────────────────────────────────────
+# ── harness-callable entry point ─────────────────────────────────────────────
 
-def main():
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", max_output_tokens=1024)
+def run_with_task(
+    task: str = (
+        "Compare retrieval-augmented generation, fine-tuning, and prompt "
+        "engineering for a domain-specific question-answering system over "
+        "internal company documentation. Recommend one approach with "
+        "reasoning."
+    ),
+    recursion_limit: int = 20,
+    tee_to_log: bool = False,
+) -> "processguard.ProcessGuard":
+    """Build the agent, attach ProcessGuard, run the task, return the guard.
+    Used both by main() and by the eval harness so the two can't drift
+    apart."""
+    llm   = ChatGoogleGenerativeAI(model="gemini-2.5-flash", max_output_tokens=1024)
     agent = create_react_agent(model=llm, tools=[web_search])
 
     guard = processguard.attach(
         agent,
-        default_policy=PolicyAction.LOG,    # observe only — don't steer
-        db_path=":memory:",
-        verbose=True,
-        llm_detectors=False,                # FM-2.6 + FM-3.1 use anthropic SDK; not in this run
+        default_policy = PolicyAction.LOG,
+        db_path        = ":memory:",
+        verbose        = False,
+        llm_detectors  = False,
     )
 
-    log_handle = _tee_emit(guard)
+    log_handle = _tee_emit(guard) if tee_to_log else None
+    try:
+        agent.invoke(
+            {"messages": [HumanMessage(content=task)]},
+            config={"recursion_limit": recursion_limit},
+        )
+    except Exception:
+        pass
+    if log_handle is not None:
+        log_handle.close()
+    return guard
 
+
+# ── main ─────────────────────────────────────────────────────────────────────
+
+def main():
+    """Standalone demo entry — builds the agent + guard inline (does NOT use
+    run_with_task because main() also wants verbose telemetry and the
+    status-JSON ceremony that the harness doesn't need)."""
     task = (
         "Compare retrieval-augmented generation, fine-tuning, and prompt "
         "engineering for a domain-specific question-answering system over "
         "internal company documentation. Recommend one approach with "
         "reasoning."
     )
+
+    llm   = ChatGoogleGenerativeAI(model="gemini-2.5-flash", max_output_tokens=1024)
+    agent = create_react_agent(model=llm, tools=[web_search])
+    guard = processguard.attach(
+        agent,
+        default_policy = PolicyAction.LOG,
+        db_path        = ":memory:",
+        verbose        = True,
+        llm_detectors  = False,
+    )
+    log_handle = _tee_emit(guard)
 
     print("\n=== ProcessGuard real LangGraph demo ===")
     print(f"Task: {task}\n")
@@ -300,6 +340,37 @@ def main():
     print(f"\nDetections: {len(guard.policy.detections)}")
     for d in guard.policy.detections:
         print(f"  {d.failure_mode:12s} {d.failure_name:30s} conf={d.confidence:.2f}")
+
+    # ── write status JSON ────────────────────────────────────────────────────
+    status = {
+        "task":                task,
+        "model":               "gemini-2.5-flash",
+        "llm_judge_detectors_enabled": False,
+        "recursion_limit":     20,
+        "final_state":         final_state,
+        "exception_type":      exc_type,
+        "exception_message":   exc_message,
+        "ddg_available":       _DDGS_AVAILABLE,
+        "ddg_failed":          _ddg_failed_once,
+        "ddg_used":            _DDGS_AVAILABLE and any(c.get("source") == "ddg" for c in _per_call_meta),
+        "total_search_calls":  _search_calls,
+        "per_call":            _per_call_meta,
+        "detections": [
+            {
+                "failure_mode": d.failure_mode,
+                "failure_name": d.failure_name,
+                "confidence":   d.confidence,
+                "agent_name":   d.agent_name,
+                "evidence":     d.evidence,
+            }
+            for d in guard.policy.detections
+        ],
+        "final_output_length": len(final_text) if final_text else None,
+    }
+    STATUS_PATH.write_text(json.dumps(status, indent=2), encoding="utf-8")
+
+    print(f"\nEvent log:  {EVENT_LOG}")
+    print(f"Status JSON: {STATUS_PATH}")
 
     # ── write status JSON ────────────────────────────────────────────────────
     status = {

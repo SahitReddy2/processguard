@@ -14,3 +14,7 @@ venv/
 .ruff_cache/
 htmlcov/
 .coverage
+
+# eval harness outputs (per v0.2 plan — run artefacts, not source)
+eval_results/
+processguard.db

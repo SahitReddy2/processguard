@@ -88,31 +88,39 @@ def build_graph():
     return g.compile()
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
+# ── harness-callable entry point ──────────────────────────────────────────────
 
-def main():
+def run_with_task(task: str = "Research RAG architectures in 2026. Give me a summary.") -> "processguard.ProcessGuard":
+    """Build the graph, attach ProcessGuard, run the task, return the guard.
+    Used both by main() and by the eval harness — keeps the demo and the
+    harness from drifting apart."""
     graph = build_graph()
-
-    # Attach processguard — STEER on step repetition so the agent can recover
     guard = processguard.attach(
         graph,
-        default_policy=PolicyAction.STEER,
-        db_path=":memory:",
+        default_policy = PolicyAction.STEER,
+        db_path        = ":memory:",
+        llm_detectors  = False,
+        verbose        = False,
     )
     guard.policy.policies["BEYOND-MAST"] = PolicyConfig(action=PolicyAction.STEER)
 
+    try:
+        graph.invoke(
+            {"messages": [HumanMessage(content=task)]},
+            config={"recursion_limit": 15},
+        )
+    except Exception:
+        # Steer-then-halt scenarios raise; the events are still in the guard.
+        pass
+    return guard
+
+
+# ── main ──────────────────────────────────────────────────────────────────────
+
+def main():
     print("\n=== ProcessGuard LangGraph Demo ===")
     print("Task: Research RAG architectures in 2026\n")
-
-    try:
-        result = graph.invoke(
-            {"messages": [HumanMessage(content="Research RAG architectures in 2026. Give me a summary.")]},
-        )
-        final = result["messages"][-1]
-        print(f"\n--- Final output ---\n{final.content}")
-    except Exception as e:
-        print(f"\n[halted] {e}")
-
+    guard = run_with_task()
     print(f"\nDetections: {len(guard.policy.detections)}")
     for d in guard.policy.detections:
         print(f"  {d.failure_mode} {d.failure_name} (conf={d.confidence:.2f})")
