@@ -372,10 +372,29 @@ adapter's TOOL_CALL / TOOL_RESULT path is therefore validated by
 **unit tests against the callback handler directly** (see
 `test_callback_handler_on_tool_start_emits_tool_call_event` and
 `test_callback_handler_on_tool_end_emits_tool_result_event`), but
-not by a real end-to-end run on this task. A future session with a
-search-forcing task (one outside the model's training distribution —
-e.g. asking about a specific recent event or a niche internal API)
-would close that final validation gap.
+not by a real end-to-end run on this task.
+
+A follow-up attempt was made with a task explicitly outside Gemini's
+training distribution (*"What were the top 3 announcements from
+Google I/O 2025? Summarize each in one sentence and cite a source"*).
+This produced its own real finding: **Gemini 2.5 Flash, with the
+`web_search` tool wired in and available, did not invoke it.** Instead
+it answered confidently: *"Google I/O 2025 has not happened yet, so
+there are no announcements to report."* This is wrong (the date at
+test time was 2026-05-20, more than a year after Google I/O 2025) and
+informative — the model preferred to assert nonsense rather than
+consult its tool.
+
+The attempt was not repeated with progressively more leading prompts
+per the v0.1.1 protocol. The validation gap therefore remains: we
+have not yet confirmed in a real production run that Gemini-driven
+`create_react_agent` actually fires `on_tool_start` / `on_tool_end`
+callbacks in the way our unit tests assume. Closing this gap requires
+either (a) a different model with more aggressive tool-use propensity,
+(b) a different task that the model is forced to consult external
+data for, or (c) a more elaborate unit test that simulates a
+LangGraph run with a mock model that always emits tool calls. None
+of these are in scope for v0.1.1.
 
 ### Test coverage delta
 
