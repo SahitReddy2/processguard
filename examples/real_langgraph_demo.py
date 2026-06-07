@@ -231,6 +231,23 @@ def _classify_exception(e: Exception) -> str:
     return "exception"
 
 
+def _final_message_text(content) -> str:
+    """LangChain message .content can be a string OR (for Gemini) a list of
+    content blocks like [{'type': 'text', 'text': '...'}]. Always return a
+    string so len() means 'characters of text', not 'number of blocks'."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for blk in content:
+            if isinstance(blk, dict) and blk.get("type") == "text":
+                parts.append(blk.get("text", ""))
+            else:
+                parts.append(str(blk))
+        return "\n".join(p for p in parts if p)
+    return str(content)
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -260,16 +277,16 @@ def main():
     final_state    = "completed"
     exc_type       = None
     exc_message    = None
-    final_content  = None
+    final_text     = None
 
     try:
         result = agent.invoke(
             {"messages": [HumanMessage(content=task)]},
             config={"recursion_limit": 20},
         )
-        final_content = result["messages"][-1].content
-        suffix = "…" if len(final_content) > 2000 else ""
-        print(f"\n--- Final output ---\n{final_content[:2000]}{suffix}")
+        final_text = _final_message_text(result["messages"][-1].content)
+        suffix = "…" if len(final_text) > 2000 else ""
+        print(f"\n--- Final output ---\n{final_text[:2000]}{suffix}")
     except Exception as e:
         final_state = _classify_exception(e)
         exc_type    = type(e).__name__
@@ -308,7 +325,7 @@ def main():
             }
             for d in guard.policy.detections
         ],
-        "final_output_length": len(final_content) if final_content else None,
+        "final_output_length": len(final_text) if final_text else None,
     }
     STATUS_PATH.write_text(json.dumps(status, indent=2), encoding="utf-8")
 

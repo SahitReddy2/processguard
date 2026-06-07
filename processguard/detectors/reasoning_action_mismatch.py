@@ -37,6 +37,13 @@ class ReasoningActionMismatchDetector(BaseDetector):
     a mismatch even though the action correctly executes step one.
 
     Requires the `anthropic` package.
+
+    Also requires REASONING events to be present in the trace. The
+    LangGraph adapter does NOT auto-emit these (provider callback chains
+    don't expose a canonical reasoning channel that's consistent across
+    Claude / Gemini / GPT). Users who want this detector to fire on a
+    LangGraph run must emit REASONING events themselves via guard.emit()
+    from their own LLM-wrapper instrumentation. See docs/real_run_findings.md.
     """
 
     failure_mode = "FM-2.6"

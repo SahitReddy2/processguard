@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+import contextvars
 import uuid
 from typing import Any, Optional
 
 from .base import BaseAdapter
 from ..core.event import AgentEvent, EventType
+
+
+# Re-entry guard: LangGraph's CompiledStateGraph.invoke() internally consumes
+# its own .stream(); without this guard, both the invoke and stream wrappers
+# below would fire on a single user-level call, creating two trace IDs and
+# duplicating every event. Item 4's real run made this concrete. See
+# tests/test_langgraph_adapter.py for the regression.
+_PG_TRACE_DEPTH: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "_pg_trace_depth", default=0
+)
 
 
 class LangGraphAdapter(BaseAdapter):
@@ -35,26 +46,55 @@ class LangGraphAdapter(BaseAdapter):
         _orig_stream = graph.stream
 
         def _invoke(input, config=None, **kwargs):
+            # Re-entry guard: if we're already inside a top-level wrapped call
+            # (which happens when invoke internally consumes our wrapped stream),
+            # pass straight through to the original without starting a new trace.
+            if _PG_TRACE_DEPTH.get() > 0:
+                return _orig_invoke(input, config=config, **kwargs)
+
             trace_id, config = _new_trace(guard, config, input)
+            token = _PG_TRACE_DEPTH.set(1)
             guard._on_trace_start(trace_id, input)
             try:
                 result = _orig_invoke(input, config=config, **kwargs)
+                # Modern LangGraph CompiledStateGraph does not fire an
+                # AgentFinish-style callback, so we synthesize TERMINATE on
+                # clean return ourselves. Without this, FM-3.1 has nothing to
+                # fire on. See tests/test_langgraph_adapter.py.
+                _emit_terminate(guard, trace_id, result)
                 guard._on_trace_end(trace_id, result)
                 return result
             except Exception as e:
                 guard._on_trace_error(trace_id, e)
                 raise
+            finally:
+                _PG_TRACE_DEPTH.reset(token)
 
         def _stream(input, config=None, **kwargs):
+            # Same re-entry guard as _invoke — applied at the top of the
+            # generator so an inner call yields chunks straight from the
+            # original without a second trace.
+            if _PG_TRACE_DEPTH.get() > 0:
+                yield from _orig_stream(input, config=config, **kwargs)
+                return
+
             trace_id, config = _new_trace(guard, config, input)
+            token = _PG_TRACE_DEPTH.set(1)
             guard._on_trace_start(trace_id, input)
             try:
                 for chunk in _orig_stream(input, config=config, **kwargs):
                     yield chunk
+                # Synthesized TERMINATE — fires only on clean exhaustion.
+                # An early break raises GeneratorExit (a BaseException, not an
+                # Exception), so we skip TERMINATE in that path; same goes for
+                # any exception raised mid-stream (caught below).
+                _emit_terminate(guard, trace_id, None)
                 guard._on_trace_end(trace_id, None)
             except Exception as e:
                 guard._on_trace_error(trace_id, e)
                 raise
+            finally:
+                _PG_TRACE_DEPTH.reset(token)
 
         graph.invoke = _invoke
         graph.stream = _stream
@@ -69,6 +109,54 @@ def _new_trace(guard, config, input_data):
     config.setdefault("callbacks", [])
     config["callbacks"] = list(config["callbacks"]) + [cb]
     return trace_id, config
+
+
+def _emit_terminate(guard, trace_id: str, result: Any):
+    """Synthesize a TERMINATE event at the end of a clean run. Modern
+    LangGraph CompiledStateGraph does not surface an AgentFinish callback,
+    so without this the FM-3.1 PrematureTermination detector would never
+    be triggered."""
+    content = _stringify_result(result)
+    event = AgentEvent(
+        trace_id   = trace_id,
+        span_id    = "terminate",
+        event_type = EventType.TERMINATE,
+        agent_name = "agent",
+        content    = content,
+    )
+    guard._emit(event)
+
+
+def _stringify_result(result: Any) -> str:
+    """Best-effort extraction of the agent's final answer text from a
+    LangGraph result dict. Handles the common {"messages": [...]} state
+    shape, including Gemini's list-of-content-blocks message format."""
+    if result is None:
+        return ""
+    if isinstance(result, str):
+        return result[:2000]
+    if isinstance(result, dict):
+        msgs = result.get("messages")
+        if msgs:
+            last = msgs[-1]
+            content = (
+                getattr(last, "content", None)
+                or (last.get("content") if isinstance(last, dict) else None)
+            )
+            if content:
+                if isinstance(content, list):
+                    # Gemini-style content blocks: [{"type": "text", "text": "..."}, ...]
+                    parts = []
+                    for blk in content:
+                        if isinstance(blk, dict) and blk.get("type") == "text":
+                            parts.append(blk.get("text", ""))
+                        elif isinstance(blk, dict):
+                            parts.append(str(blk))
+                        else:
+                            parts.append(str(blk))
+                    return "\n".join(p for p in parts if p)[:2000]
+                return str(content)[:2000]
+    return str(result)[:2000]
 
 
 class _PGCallbackHandler:

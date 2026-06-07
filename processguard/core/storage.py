@@ -9,7 +9,15 @@ from .event import AgentEvent, EventType
 
 
 class TraceStorage:
-    """Thread-safe SQLite-backed event store. Default path is processguard.db."""
+    """
+    Thread-safe SQLite-backed event store. Default path is processguard.db.
+
+    A single connection is shared across all threads, serialised by a lock.
+    This is required for `:memory:` databases (each call to
+    `sqlite3.connect(":memory:")` returns a *new, empty* database) and is
+    the simplest correct pattern for file-backed databases under low write
+    volume. See tests/test_storage_threading.py for the regression.
+    """
 
     _CREATE = """
         CREATE TABLE IF NOT EXISTS events (
@@ -30,47 +38,50 @@ class TraceStorage:
 
     def __init__(self, db_path: str = "processguard.db"):
         self.db_path = db_path
-        self._local = threading.local()
+        # check_same_thread=False is safe because every read/write here is
+        # serialised by self._lock; SQLite itself supports the access pattern.
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._lock = threading.Lock()
         self._init_db()
 
     # ── connection ─────────────────────────────────────────────────────────
 
-    def _conn(self) -> sqlite3.Connection:
-        if not hasattr(self._local, "conn"):
-            self._local.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        return self._local.conn
-
     def _init_db(self):
-        c = self._conn()
-        c.execute(self._CREATE)
-        c.execute("CREATE INDEX IF NOT EXISTS idx_trace ON events(trace_id)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_agent ON events(trace_id, agent_name)")
-        c.commit()
+        with self._lock:
+            self._conn.execute(self._CREATE)
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_trace ON events(trace_id)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_agent ON events(trace_id, agent_name)"
+            )
+            self._conn.commit()
 
     # ── write ───────────────────────────────────────────────────────────────
 
     def save(self, event: AgentEvent):
-        c = self._conn()
-        c.execute(
-            "INSERT OR REPLACE INTO events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                event.event_id, event.trace_id, event.span_id, event.parent_span_id,
-                event.event_type.value, event.agent_name, event.timestamp,
-                event.tool_name,
-                json.dumps(event.tool_args) if event.tool_args is not None else None,
-                event.tool_result,
-                event.content,
-                json.dumps(event.metadata) if event.metadata else None,
-            ),
-        )
-        c.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    event.event_id, event.trace_id, event.span_id, event.parent_span_id,
+                    event.event_type.value, event.agent_name, event.timestamp,
+                    event.tool_name,
+                    json.dumps(event.tool_args) if event.tool_args is not None else None,
+                    event.tool_result,
+                    event.content,
+                    json.dumps(event.metadata) if event.metadata else None,
+                ),
+            )
+            self._conn.commit()
 
     # ── read ────────────────────────────────────────────────────────────────
 
     def get_trace(self, trace_id: str) -> list[AgentEvent]:
-        rows = self._conn().execute(
-            "SELECT * FROM events WHERE trace_id=? ORDER BY timestamp", (trace_id,)
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM events WHERE trace_id=? ORDER BY timestamp", (trace_id,)
+            ).fetchall()
         return [self._row(r) for r in rows]
 
     def get_recent(
@@ -79,28 +90,30 @@ class TraceStorage:
         n: int,
         agent_name: Optional[str] = None,
     ) -> list[AgentEvent]:
-        if agent_name:
-            rows = self._conn().execute(
-                "SELECT * FROM events WHERE trace_id=? AND agent_name=? "
-                "ORDER BY timestamp DESC LIMIT ?",
-                (trace_id, agent_name, n),
-            ).fetchall()
-        else:
-            rows = self._conn().execute(
-                "SELECT * FROM events WHERE trace_id=? ORDER BY timestamp DESC LIMIT ?",
-                (trace_id, n),
-            ).fetchall()
+        with self._lock:
+            if agent_name:
+                rows = self._conn.execute(
+                    "SELECT * FROM events WHERE trace_id=? AND agent_name=? "
+                    "ORDER BY timestamp DESC LIMIT ?",
+                    (trace_id, agent_name, n),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM events WHERE trace_id=? ORDER BY timestamp DESC LIMIT ?",
+                    (trace_id, n),
+                ).fetchall()
         return list(reversed([self._row(r) for r in rows]))
 
     def count_events(self, trace_id: str, agent_name: Optional[str] = None) -> int:
-        if agent_name:
-            return self._conn().execute(
-                "SELECT COUNT(*) FROM events WHERE trace_id=? AND agent_name=?",
-                (trace_id, agent_name),
+        with self._lock:
+            if agent_name:
+                return self._conn.execute(
+                    "SELECT COUNT(*) FROM events WHERE trace_id=? AND agent_name=?",
+                    (trace_id, agent_name),
+                ).fetchone()[0]
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM events WHERE trace_id=?", (trace_id,)
             ).fetchone()[0]
-        return self._conn().execute(
-            "SELECT COUNT(*) FROM events WHERE trace_id=?", (trace_id,)
-        ).fetchone()[0]
 
     # ── helpers ─────────────────────────────────────────────────────────────
 

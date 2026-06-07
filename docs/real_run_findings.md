@@ -260,3 +260,129 @@ This is exactly the kind of finding the v0.1.1 direction-correction
 pass was built to surface. v0.1.0 with its synthetic demos *looked*
 fine. v0.1.1 with one real run reveals the adapter gap. That's the
 loop working as intended.
+
+---
+
+## Update — bugs fixed in v0.1.1
+
+The above sections are preserved as the discovery record. The bugs they
+describe were fixed in a follow-up session that ran in the same v0.1.1
+window, one at a time, each with a failing-test-first regression suite.
+Re-running the demo at the end of the fix cycle produces a clean event
+stream.
+
+### Bug 1 (double-trace) — fixed
+
+**Cause confirmed.** `CompiledStateGraph.invoke()` internally consumes
+`stream()`. The adapter wrapped both, so a single user-level invoke
+produced two trace IDs with duplicate events.
+
+**Fix.** Added a `contextvars.ContextVar`-based re-entry guard at the
+top of both `_invoke` and `_stream` wrappers. If we're already inside a
+top-level wrapped call, the inner one passes straight through to the
+original without starting a second trace. Tests in
+[`tests/test_langgraph_adapter.py`](../tests/test_langgraph_adapter.py)
+exercise:
+- `invoke` that internally consumes `stream` produces exactly 1 trace
+- direct `stream` calls still produce 1 trace
+- two top-level invokes produce 2 distinct traces (guard resets between calls)
+
+**Re-run verification.** Demo now reports exactly one `trace … started` /
+`trace … ended` pair per user-level invoke. Event log contains no
+duplicated entries with different trace IDs.
+
+### Bug 1b (storage threading) — fixed
+
+**Discovered by fixing Bug 1.** With double-tracing out of the way, the
+agent advanced to a tool call, which triggered LangChain's `on_tool_start`
+callback on a worker thread. The thread-local `sqlite3.connect(":memory:")`
+returned a NEW empty in-memory database, hence
+`OperationalError: no such table: events`.
+
+**Fix.** Replaced thread-local connections with a single shared
+connection plus a `threading.Lock`. Safe because `check_same_thread=False`
+is set and every read/write is serialised by the lock. Tests in
+[`tests/test_storage_threading.py`](../tests/test_storage_threading.py)
+cover:
+- `:memory:` DB visible from a worker thread (was the failing case)
+- file-backed DB visible from a worker thread
+- 8 threads × 5 saves each lands all 40 events with zero exceptions
+
+### Bug 2a (missing TERMINATE event) — fixed
+
+**Cause confirmed.** Modern LangGraph's `CompiledStateGraph` does not
+surface an `AgentFinish` callback through the LangChain callback chain.
+The adapter's `on_agent_finish` handler was effectively dead code on a
+current `create_react_agent` graph.
+
+**Fix.** The `_invoke` and `_stream` wrappers now synthesize a
+`TERMINATE` `AgentEvent` on clean completion (after the original call
+returns, before `_on_trace_end`). For streams, an early break or
+mid-stream exception suppresses TERMINATE — only clean exhaustion emits
+it. A new `_stringify_result` helper extracts the final answer text
+from the common `{"messages": [...]}` state shape and handles Gemini's
+list-of-content-blocks format.
+
+**Re-run verification.** Demo's event log now contains a `terminate`
+event in addition to the `message` event:
+
+```
+[message]   span=step-1     text_len=194
+[terminate] span=terminate  text_len=194
+```
+
+This means FM-3.1 PrematureTermination now has something to fire on
+when re-enabled.
+
+### Bug 2b (REASONING events not auto-emitted) — documented as a known limitation, not fixed
+
+**Cause.** LangGraph (and LangChain's callback chain) does not have a
+canonical "reasoning" channel that is consistent across model providers.
+Some models (e.g. Claude with extended thinking enabled) expose
+reasoning tokens through provider-specific message attributes; others
+(Gemini, GPT-4o without explicit thinking mode) do not expose reasoning
+separately from the final output at all.
+
+**Disposition for v0.1.1.** The adapter does not attempt to synthesize
+REASONING events from LLM-end content. Users of FM-2.6
+ReasoningActionMismatch must emit REASONING events manually via
+`guard.emit()` from their own instrumentation — typically a wrapper
+around the LLM call that pulls the model's intermediate reasoning out
+of provider-specific response fields and pushes it as a REASONING
+event before the next TOOL_CALL fires.
+
+This limitation is now explicit in the FM-2.6 detector contract
+and will be documented in the v0.1.1 README's "what doesn't work yet"
+section.
+
+### Cosmetic — `final_output_length: 1` bug in demo — fixed
+
+The demo's status JSON previously recorded `final_output_length: 1`
+because Gemini returns message content as a list of content blocks
+and `len()` was measuring the list, not the text. A new
+`_final_message_text` helper joins the text from any text-typed
+blocks before measuring. Re-run shows `final_output_length: 194`
+(matches the actual captured text length).
+
+### What still hasn't been validated against a real run
+
+The agent in the verification run did not invoke `web_search` because
+Gemini answered the open-ended task from training priors. The
+adapter's TOOL_CALL / TOOL_RESULT path is therefore validated by
+**unit tests against the callback handler directly** (see
+`test_callback_handler_on_tool_start_emits_tool_call_event` and
+`test_callback_handler_on_tool_end_emits_tool_result_event`), but
+not by a real end-to-end run on this task. A future session with a
+search-forcing task (one outside the model's training distribution —
+e.g. asking about a specific recent event or a niche internal API)
+would close that final validation gap.
+
+### Test coverage delta
+
+- v0.1.0: 24 tests (4 detectors + policy)
+- v0.1.1: 34 tests
+  - +3 in `test_langgraph_adapter.py` for the re-entry guard
+  - +4 in `test_langgraph_adapter.py` for callback translation + TERMINATE
+  - +3 in `test_storage_threading.py` for cross-thread storage
+
+All 34 pass.
