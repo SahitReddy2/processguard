@@ -85,6 +85,8 @@ class EvalReport:
                     "elapsed_seconds": c.elapsed_seconds,
                     "event_count":     c.event_count,
                     "detection_count": c.detection_count,
+                    "attempts_passed": c.attempts_passed,
+                    "attempts_total":  c.attempts_total,
                     "assertions": [
                         {
                             "type":     a.assertion_type,
@@ -93,6 +95,18 @@ class EvalReport:
                             "evidence": a.evidence,
                         }
                         for a in c.assertion_results
+                    ],
+                    # When k>1, per-attempt detail lives here so flaky-case
+                    # identification doesn't lose information. Empty list
+                    # when k=1 (back-compat).
+                    "attempts": [
+                        {
+                            "status":          a.status.value,
+                            "elapsed_seconds": a.elapsed_seconds,
+                            "error_message":   a.error_message,
+                            "skip_reason":     a.skip_reason,
+                        }
+                        for a in c.attempts
                     ],
                 }
                 for c in self.case_results
@@ -113,7 +127,8 @@ _STATUS_EMOJI = {
 def render_markdown(report: EvalReport) -> str:
     """Markdown table suitable for printing to stdout AND for posting as a
     PR comment. The skip count is on the header line so the green badge
-    can't overclaim."""
+    can't overclaim. When the harness ran with `repeat > 1` on any case,
+    an extra `pass^k` column is added showing the per-case fraction."""
     deterministic_passed = sum(
         1 for r in report.case_results
         if r.status == CaseStatus.PASSED and not _was_skip_eligible(r)
@@ -123,6 +138,13 @@ def render_markdown(report: EvalReport) -> str:
         if r.status in (CaseStatus.PASSED, CaseStatus.FAILED, CaseStatus.ERROR)
     )
     skip_count = report.skipped
+    # Detect whether any case was run with k>1, in which case we surface the
+    # pass^k column. A heterogeneous mix (some cases k=1, some k=N) is
+    # technically possible but not produced by the current Harness; we'd
+    # still display the column for cases where k>1 and leave it blank for
+    # the rest, which is the right behaviour.
+    show_pass_at_k = any(c.attempts for c in report.case_results)
+    k_max          = max((c.attempts_total for c in report.case_results), default=1)
 
     header_parts = [
         f"**ProcessGuard eval gate** — {deterministic_passed}/{deterministic_total} deterministic"
@@ -131,6 +153,15 @@ def render_markdown(report: EvalReport) -> str:
         header_parts.append("❌")
     else:
         header_parts.append("✅")
+    if show_pass_at_k:
+        # Aggregate pass^k across the whole gold set: cases that passed all
+        # k attempts. This is the headline consistency number for the run.
+        all_pass_count = sum(
+            1 for c in report.case_results
+            if c.attempts and c.attempts_passed == c.attempts_total
+        )
+        total_with_attempts = sum(1 for c in report.case_results if c.attempts)
+        header_parts.append(f"• pass^{k_max}: {all_pass_count}/{total_with_attempts}")
     if skip_count:
         reasons = " • ".join(
             f"{len(ids)} case(s) SKIPPED ({reason})"
@@ -138,12 +169,21 @@ def render_markdown(report: EvalReport) -> str:
         )
         header_parts.append(f"• {reasons}")
 
-    lines = [
-        " ".join(header_parts),
-        "",
-        "| Status | Case | Notes |",
-        "|--------|------|-------|",
-    ]
+    if show_pass_at_k:
+        lines = [
+            " ".join(header_parts),
+            "",
+            f"| Status | Case | pass^{k_max} | Notes |",
+            "|--------|------|---------|-------|",
+        ]
+    else:
+        lines = [
+            " ".join(header_parts),
+            "",
+            "| Status | Case | Notes |",
+            "|--------|------|-------|",
+        ]
+
     for c in report.case_results:
         emoji   = _STATUS_EMOJI[c.status]
         if c.status == CaseStatus.SKIPPED:
@@ -156,7 +196,11 @@ def render_markdown(report: EvalReport) -> str:
                 note = "; ".join(f"{a.assertion_type}: {a.message}" for a in failed_asserts)
             else:
                 note = f"{c.event_count} events, {c.detection_count} detections, {c.elapsed_seconds*1000:.1f} ms"
-        lines.append(f"| {emoji} {c.status.value} | `{c.case_id}` | {note} |")
+        if show_pass_at_k:
+            pak_col = c.pass_at_k or "—"
+            lines.append(f"| {emoji} {c.status.value} | `{c.case_id}` | {pak_col} | {note} |")
+        else:
+            lines.append(f"| {emoji} {c.status.value} | `{c.case_id}` | {note} |")
 
     lines += [
         "",

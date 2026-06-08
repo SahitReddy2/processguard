@@ -25,7 +25,13 @@ class CaseStatus(str, Enum):
 
 @dataclass
 class CaseResult:
-    """The harness's verdict on one EvalCase."""
+    """The harness's verdict on one EvalCase.
+
+    When the harness runs with `repeat > 1`, the aggregate fields here
+    (`status`, `assertion_results`, etc.) reflect the FIRST attempt for
+    back-compat; `attempts` holds the full per-attempt record so the
+    `pass^k` column in the report can show fractions.
+    """
     case_id:          str
     status:           CaseStatus
     assertion_results: list[EvalResult] = field(default_factory=list)
@@ -34,6 +40,28 @@ class CaseResult:
     elapsed_seconds:  float              = 0.0
     event_count:      int                = 0
     detection_count:  int                = 0
+    # Per-attempt results when run with repeat > 1. Empty list ⇒ single
+    # attempt (default behaviour for k=1 — keeps prior reports unchanged).
+    attempts:         list["CaseResult"] = field(default_factory=list)
+
+    # ── pass^k accessors ────────────────────────────────────────────────────
+
+    @property
+    def attempts_total(self) -> int:
+        return len(self.attempts) if self.attempts else 1
+
+    @property
+    def attempts_passed(self) -> int:
+        if not self.attempts:
+            return 1 if self.status == CaseStatus.PASSED else 0
+        return sum(1 for a in self.attempts if a.status == CaseStatus.PASSED)
+
+    @property
+    def pass_at_k(self) -> str:
+        """Display string like '4/5' when `repeat > 1`, empty otherwise."""
+        if not self.attempts:
+            return ""
+        return f"{self.attempts_passed}/{self.attempts_total}"
 
 
 class Harness:
@@ -45,22 +73,72 @@ class Harness:
 
     Each case runs in an isolated `:memory:` SQLite ProcessGuard instance —
     one case's events cannot leak into another's.
+
+    When constructed with `repeat > 1`, each case runs `repeat` times. The
+    aggregate `CaseResult.status` is PASSED iff every attempt passed, FAILED
+    if any attempt failed, ERROR if any attempt erred (errors dominate
+    failures dominate skips). The full per-attempt detail lives in
+    `result.attempts` and `result.pass_at_k` for the report.
     """
 
-    def __init__(self, cases: list[EvalCase], *, verbose: bool = False):
+    def __init__(
+        self,
+        cases:    list[EvalCase],
+        *,
+        verbose:  bool = False,
+        repeat:   int  = 1,
+    ):
+        if repeat < 1:
+            raise ValueError(f"repeat must be >= 1, got {repeat}")
         self.cases   = cases
         self.verbose = verbose
+        self.repeat  = repeat
 
     # ── public ───────────────────────────────────────────────────────────────
 
     def run(self) -> list[CaseResult]:
         results: list[CaseResult] = []
         for case in self.cases:
-            r = self._run_case(case)
+            if self.repeat == 1:
+                r = self._run_case(case)
+            else:
+                r = self._run_case_repeated(case, self.repeat)
             results.append(r)
             if self.verbose:
-                print(f"  [{r.status.value.upper():7s}] {case.id}")
+                pak = f" [{r.pass_at_k}]" if r.attempts else ""
+                print(f"  [{r.status.value.upper():7s}]{pak} {case.id}")
         return results
+
+    # ── repeat-k driver ──────────────────────────────────────────────────────
+
+    def _run_case_repeated(self, case: EvalCase, k: int) -> CaseResult:
+        """Run a case k times and return one aggregated CaseResult. Aggregate
+        status: ERROR if any attempt erred; SKIPPED if all attempts skipped;
+        FAILED if any attempt failed; PASSED otherwise."""
+        attempts: list[CaseResult] = [self._run_case(case) for _ in range(k)]
+
+        statuses = [a.status for a in attempts]
+        if any(s == CaseStatus.ERROR for s in statuses):
+            agg = CaseStatus.ERROR
+        elif all(s == CaseStatus.SKIPPED for s in statuses):
+            agg = CaseStatus.SKIPPED
+        elif any(s == CaseStatus.FAILED for s in statuses):
+            agg = CaseStatus.FAILED
+        else:
+            agg = CaseStatus.PASSED
+
+        first = attempts[0]
+        return CaseResult(
+            case_id           = case.id,
+            status            = agg,
+            assertion_results = first.assertion_results,
+            skip_reason       = first.skip_reason,
+            error_message     = first.error_message,
+            elapsed_seconds   = sum(a.elapsed_seconds for a in attempts),
+            event_count       = first.event_count,
+            detection_count   = first.detection_count,
+            attempts          = attempts,
+        )
 
     # ── per-case ─────────────────────────────────────────────────────────────
 
