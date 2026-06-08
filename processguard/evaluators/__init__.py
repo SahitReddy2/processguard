@@ -8,6 +8,7 @@ from .deterministic import (
     AssertEventCountByType,
     AssertSingleTraceId,
 )
+from .llm_judge import AssertJudgeVerdict
 
 __all__ = [
     "Evaluator",
@@ -23,4 +24,5 @@ __all__ = [
     "AssertDetectorDidNotFire",
     "AssertEventCountByType",
     "AssertSingleTraceId",
+    "AssertJudgeVerdict",
 ]
