@@ -18,3 +18,7 @@ htmlcov/
 # eval harness outputs (per v0.2 plan — run artefacts, not source)
 eval_results/
 processguard.db
+
+# calibration run artefacts (per v0.3 plan — headline numbers
+# move into docs/calibration.md by hand after review)
+calibration_results/

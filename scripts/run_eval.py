@@ -68,6 +68,16 @@ def main() -> int:
         default=None,
         help="Write the markdown report to this file path (in addition to stdout, unless --no-markdown).",
     )
+    p.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help=(
+            "Run each case this many times to expose flakiness. The report "
+            "adds a 'pass^k' column showing the per-case fraction (e.g. 4/5). "
+            "Default 1 (CI does not multiply API spend)."
+        ),
+    )
     args = p.parse_args()
 
     cases = load_cases(args.gold)
@@ -78,7 +88,7 @@ def main() -> int:
     print(f"Loaded {len(cases)} case(s) from {args.gold}", file=sys.stderr)
 
     t0 = time.perf_counter()
-    harness  = Harness(cases, verbose=not args.quiet)
+    harness  = Harness(cases, verbose=not args.quiet, repeat=args.repeat)
     results  = harness.run()
     elapsed  = time.perf_counter() - t0
 
